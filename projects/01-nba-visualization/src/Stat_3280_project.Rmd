@@ -1,0 +1,826 @@
+---
+title: "The Evolution of NBA Basketball Through the Lens of Data Visualizations"
+author: "Thad Felten"
+date: "2025-12-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+
+team_summaries <- read_csv("/Users/thaddeusfelten/Desktop/Shiny App 2/Team Summaries.csv")
+
+recode_franchise <- function(name) {
+  case_when(
+    name %in% c("Atlanta Hawks","St. Louis Hawks","Milwaukee Hawks","Tri-Cities Blackhawks") ~ "Atlanta Hawks",
+    name == "Boston Celtics" ~ "Boston Celtics",
+    name %in% c("Brooklyn Nets","New Jersey Nets","New York Nets","New Jersey Americans") ~ "Brooklyn Nets",
+    name %in% c("Charlotte Hornets","Charlotte Bobcats") ~ "Charlotte Hornets",
+    name == "Chicago Bulls" ~ "Chicago Bulls",
+    name == "Cleveland Cavaliers" ~ "Cleveland Cavaliers",
+    name == "Dallas Mavericks" ~ "Dallas Mavericks",
+    name == "Denver Nuggets" ~ "Denver Nuggets",
+    name %in% c("Detroit Pistons","Fort Wayne Pistons") ~ "Detroit Pistons",
+    name %in% c("Golden State Warriors","San Francisco Warriors","Philadelphia Warriors") ~ "Golden State Warriors",
+    name %in% c("Houston Rockets","San Diego Rockets") ~ "Houston Rockets",
+    name == "Indiana Pacers" ~ "Indiana Pacers",
+    name %in% c("Los Angeles Clippers","San Diego Clippers","Buffalo Braves") ~ "Los Angeles Clippers",
+    name %in% c("Los Angeles Lakers","Minneapolis Lakers") ~ "Los Angeles Lakers",
+    name %in% c("Memphis Grizzlies","Vancouver Grizzlies") ~ "Memphis Grizzlies",
+    name == "Miami Heat" ~ "Miami Heat",
+    name == "Milwaukee Bucks" ~ "Milwaukee Bucks",
+    name == "Minnesota Timberwolves" ~ "Minnesota Timberwolves",
+    name %in% c("New Orleans Pelicans","New Orleans Hornets","New Orleans/Oklahoma City Hornets") ~ "New Orleans Pelicans",
+    name == "New York Knicks" ~ "New York Knicks",
+    name %in% c("Oklahoma City Thunder","Seattle SuperSonics") ~ "Oklahoma City Thunder",
+    name == "Orlando Magic" ~ "Orlando Magic",
+    name %in% c("Philadelphia 76ers","Syracuse Nationals") ~ "Philadelphia 76ers",
+    name == "Phoenix Suns" ~ "Phoenix Suns",
+    name == "Portland Trail Blazers" ~ "Portland Trail Blazers",
+    name %in% c("Sacramento Kings","Kansas City Kings",
+                "Kansas City-Omaha Kings","Cincinnati Royals","Rochester Royals") ~ "Sacramento Kings",
+    name == "San Antonio Spurs" ~ "San Antonio Spurs",
+    name == "Toronto Raptors" ~ "Toronto Raptors",
+    name %in% c("Utah Jazz","New Orleans Jazz") ~ "Utah Jazz",
+    name %in% c("Washington Wizards","Washington Bullets",
+                "Capital Bullets","Baltimore Bullets") ~ "Washington Wizards",
+    TRUE ~ NA_character_
+  )
+}
+
+team_summaries <- team_summaries %>%
+  mutate(
+    season    = as.numeric(season),
+    franchise = recode_franchise(team),
+    win_pct   = w / (w + l)
+  ) %>%
+  filter(!is.na(franchise))
+
+
+champions_raw <- read_csv("/Users/thaddeusfelten/Desktop/Shiny App 2/NBA_Champion_Data.csv")
+
+champions <- champions_raw %>%
+  filter(Lg == "NBA") %>%
+  mutate(
+    season    = as.numeric(Year),
+    franchise = recode_franchise(Champion)
+  ) %>%
+  filter(!is.na(franchise)) %>%
+  select(season, franchise)
+
+
+playstyle_metrics <- c("pace", "x3p_ar", "f_tr", "ts_percent", "o_rtg", "d_rtg")
+
+metric_labels <- c(
+  pace       = "Pace",
+  x3p_ar     = "3PA Rate (3PA / FGA)",
+  f_tr       = "Free Throw Rate (FTA / FGA)",
+  ts_percent = "True Shooting %",
+  o_rtg      = "Offensive Rating",
+  d_rtg      = "Defensive Rating"
+)
+
+league_avgs <- team_summaries %>%
+  group_by(season) %>%
+  summarize(across(all_of(playstyle_metrics), ~ mean(.x, na.rm = TRUE)),
+            .groups = "drop")
+
+champ_rows <- team_summaries %>%
+  inner_join(champions, by = c("season", "franchise"))
+
+champ_long <- champ_rows %>%
+  select(season, franchise, all_of(playstyle_metrics)) %>%
+  pivot_longer(cols = all_of(playstyle_metrics),
+               names_to = "metric",
+               values_to = "champ_value") %>%
+  left_join(
+    league_avgs %>%
+      pivot_longer(cols = all_of(playstyle_metrics),
+                   names_to = "metric",
+                   values_to = "league_value"),
+    by = c("season", "metric")
+  ) %>%
+  mutate(
+    deviation    = champ_value - league_value,
+    metric_label = recode(metric, !!!metric_labels)
+  ) %>%
+  arrange(season, metric)
+
+
+
+champs <- champ_long %>%
+  filter(season >= 1980) %>%
+  ggplot(aes(x = season, y = deviation)) +
+  geom_hline(yintercept = 0, colour = "grey50", linetype = "dashed") +
+  geom_line(colour = "#0072B2", linewidth = 1) +
+  geom_point(colour = "#0072B2", size = 1.9) +
+  facet_wrap(~ metric_label, scales = "free_y", ncol = 3) +
+  labs(
+    title = "How NBA Champions Differ from League Norms",
+    subtitle = "Champion statistic minus league average in the same season (1980–present)",
+    x = "Season",
+    y = "Champion − League"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text       = element_text(face = "bold"),
+    plot.title       = element_text(face = "bold", size = 16),
+    plot.subtitle    = element_text(size = 11),
+    panel.grid.minor = element_blank(),
+    plot.margin      = margin(20, 20, 20, 20)
+  )
+
+champs
+
+ggsave("champ_styles.png", champs, width = 7.5, height = 5.5, dpi = 200)
+```
+
+
+
+
+```{r,echo=FALSE}
+
+library(plotly)
+
+league_off <- team_summaries %>%
+  filter(season <= 2025) %>%  
+  group_by(season) %>%
+  summarise(
+    off_rating = mean(o_rtg, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(off_rating)) %>%  
+  mutate(season = as.integer(season))
+
+frame_seasons <- sort(unique(league_off$season))
+
+frames_df <- expand_grid(
+  frame_season = frame_seasons,
+  season       = league_off$season
+) %>%
+  left_join(league_off, by = "season") %>%
+  filter(season <= frame_season)
+
+animated_plot <- plot_ly(
+  frames_df,
+  x     = ~season,
+  y     = ~off_rating,
+  frame = ~frame_season,
+  type  = "scatter",
+  mode  = "lines+markers",
+  name  = "Offensive Rating"
+) %>%
+  layout(
+    title = "Evolution of League Offensive Rating Over Time",
+    xaxis = list(title = "Season"),
+    yaxis = list(title = "Offensive Rating (points per 100 possessions)")
+  ) %>%
+  animation_opts(
+    frame      = 100,
+    transition = 0,
+    redraw     = FALSE
+  ) %>%
+  animation_slider(
+    currentvalue = list(prefix = "Season: ")
+  )
+
+animated_plot
+```
+
+
+
+
+
+```{r, echo=FALSE}
+team_pg <- read_csv("/Users/thaddeusfelten/Desktop/Shiny App 2/Team Stats Per Game.csv")
+
+merged <- team_pg %>%
+  left_join(
+    team_summaries %>%
+      select(season, abbreviation, pace, o_rtg),
+    by = c("season", "abbreviation")
+  ) %>%
+  filter(season >= 1980, season <= 2025) %>%
+  filter(!is.na(x3pa_per_game))
+
+league_var <- merged %>%
+  group_by(season) %>%
+  summarise(
+    var_3pa  = var(x3pa_per_game, na.rm = TRUE),
+    var_pace = var(pace,          na.rm = TRUE),
+    var_ortg = var(o_rtg,         na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    cols = starts_with("var_"),
+    names_to = "metric",
+    values_to = "variance"
+  ) %>%
+  mutate(
+    metric = recode(
+      metric,
+      "var_3pa"  = "3PA per Game",
+      "var_pace" = "Pace",
+      "var_ortg" = "Offensive Rating"
+    )
+  )
+
+
+three_p_var <- ggplot(league_var, aes(season, variance, color = metric)) +
+  geom_line(linewidth = 1.1) +
+  scale_color_manual(
+    values = c(
+      "3PA per Game" = "#E69F00",
+      "Offensive Rating" = "#009E73",
+      "Pace" = "#0072B2"
+    )
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    plot.margin = margin(24, 24, 24, 24)
+  ) +
+  labs(
+    title = "How Much Are NBA Teams Differentiating in Play Style?",
+    subtitle = "Variance of 3PA volume, pace, and offensive efficiency across teams by season (1980–2025)",
+    x = "Season",
+    y = "Variance",
+    color = "Metric"
+  )
+
+ggsave("3pvariance.png", three_p_var, width = 7.5, height = 5.5, dpi = 200)
+
+```
+
+```{r, echo=FALSE}
+
+advanced <- read_csv("/Users/thaddeusfelten/Desktop/Shiny App 2/Advanced.csv")
+
+usage_by_pos <- advanced %>%
+  filter(mp >= 1000) %>%
+  mutate(
+    pos_group = case_when(
+      str_detect(pos, "PG|SG|G") ~ "Guard",
+      str_detect(pos, "SF|F")    ~ "Wing",
+      str_detect(pos, "PF|C")    ~ "Big",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  drop_na(pos_group) %>%
+  filter(season >= 1980) %>%   
+  group_by(season, pos_group) %>%
+  summarise(
+    avg_usg = mean(usg_percent, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+usage_plot <- ggplot(
+  usage_by_pos,
+  aes(x = season, y = avg_usg, color = pos_group)
+) +
+  geom_line(linewidth = 1.1) +
+  scale_color_manual(
+    values = c(
+      "Guard" = "#0072B2",  
+      "Wing"  = "#009E73", 
+      "Big"   = "#E69F00"   
+    )
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    plot.margin = margin(24, 24, 24, 24)
+  ) +
+  labs(
+    title = "How Player Offensive Roles Have Shifted Over Time",
+    subtitle = "Average usage rate by position group (players with ≥1000 minutes)",
+    x = "Season",
+    y = "Average Usage Rate (%)",
+    color = "Position Group"
+  )
+
+ggsave("pos_usage.png", usage_plot, width = 7.5, height = 5.5, dpi = 200)
+```
+
+
+```{r}
+library(tidyverse)
+library(scales)
+
+x3p_z_score <- team_summaries %>%
+  mutate(
+    season = as.integer(season),
+    win_pct = w / (w + l)
+  ) %>%
+  filter(season >= 1980, season <= 2025) %>%
+  group_by(season) %>%
+  mutate(
+    lg_mean_3par = mean(x3p_ar, na.rm = TRUE),
+    lg_sd_3par = sd(x3p_ar, na.rm = TRUE),
+    z_3par = (x3p_ar - lg_mean_3par) / lg_sd_3par
+  ) %>%
+  ungroup() %>%
+  mutate(
+    era = case_when(
+      season <= 1999 ~ "1980–1999",
+      season <= 2013 ~ "2000–2013",
+      TRUE ~ "2014–2025"
+    )
+  ) %>%
+  filter(is.finite(z_3par), is.finite(win_pct))
+
+threes_vs_wins <- ggplot(x3p_z_score, aes(x = z_3par, y = win_pct, color = era)) +
+  geom_hline(yintercept = 0.5, linewidth = 0.5, linetype = "dashed") +
+  geom_vline(xintercept = 0, linewidth = 0.5, linetype = "dashed") +
+  geom_point(alpha = 0.25, size = 1.8) +
+  geom_smooth(se = FALSE, linewidth = 1.1, alpha = 0.25) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Team-level relationship between three-point volume and winning",
+    subtitle = "Each point is a team-season; x-axis shows within-season 3PA deviation",
+    x = "3PA rate deviation from league average (z-score)",
+    y = "Win percentage",
+    color = "Era"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top",
+    plot.title.position = "plot"
+  )
+
+ggsave("threes_wins.png", threes_vs_wins, width = 6, height = 4, dpi = 200)
+```
+
+```{r}
+x3p_bins_df <- team_summaries %>%
+  mutate(
+    season  = as.integer(season),
+    win_pct = w / (w + l)
+  ) %>%
+  filter(season >= 1980, season <= 2025) %>%
+  group_by(season) %>%
+  mutate(
+    x3p_bin = case_when(
+      x3p_ar <= quantile(x3p_ar, 1/3, na.rm = TRUE) ~ "Low",
+      x3p_ar <= quantile(x3p_ar, 2/3, na.rm = TRUE) ~ "Medium",
+      TRUE ~ "High"
+    )
+  ) %>%
+  ungroup() %>%
+  mutate(
+    era = case_when(
+      season <= 1999 ~ "1980–1999",
+      season <= 2013 ~ "2000–2013",
+      TRUE ~ "2014–2025"
+    ),
+    x3p_bin = factor(x3p_bin, levels = c("Low", "Medium", "High"))
+  ) %>%
+  filter(is.finite(win_pct), !is.na(x3p_bin))
+
+bin_box <- ggplot(x3p_bins_df, aes(x = x3p_bin, y = win_pct)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.35) +
+  geom_jitter(width = 0.15, alpha = 0.12, size = 1) +
+  facet_wrap(~ era, nrow = 1) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Win percentage by three-point usage group",
+    subtitle = "Teams grouped into within-season three-point attempt tertiles",
+    x = "Three-point attempt rate (within-season bins)",
+    y = "Win percentage"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    plot.title.position = "plot",
+    strip.text = element_text(face = "bold")
+  )
+
+ggsave("threes_bin_box.png", bin_box, width = 6, height = 4, dpi = 200)
+```
+
+```{r}
+league_trends <- team_summaries %>%
+  group_by(season) %>%
+  summarise(
+    pace = mean(pace, na.rm = TRUE),
+    ts_percent = mean(ts_percent, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(season >= 1980, season <= 2025)
+
+p_pace <- ggplot(league_trends, aes(season, pace)) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(limits = c(75, 120)) + 
+  labs(
+    title = "League Average Pace Over Time",
+    x = "Season",
+    y = "Pace (possessions per game)"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave("pace_over_time.png", p_pace, width = 6, height = 4, dpi = 200)
+
+p_ts <- ggplot(league_trends, aes(season, ts_percent)) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(limits = c(0.35, 0.7), labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "League Average True Shooting Percentage",
+    x = "Season",
+    y = "True Shooting %"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggsave("ts_over_time.png", p_ts, width = 6, height = 4, dpi = 200)
+
+```
+
+```{r}
+# App 1 code
+
+team_summaries <- read_csv("Team Summaries.csv")
+
+team_summaries <- team_summaries %>%
+  mutate(
+    season = as.numeric(season),
+    franchise = case_when(
+      team %in% c("Atlanta Hawks","St. Louis Hawks","Milwaukee Hawks","Tri-Cities Blackhawks") ~ "Atlanta Hawks",
+      team == "Boston Celtics" ~ "Boston Celtics",
+      team %in% c("Brooklyn Nets","New Jersey Nets","New York Nets","New Jersey Americans") ~ "Brooklyn Nets",
+      team %in% c("Charlotte Hornets","Charlotte Bobcats") ~ "Charlotte Hornets",
+      team == "Chicago Bulls" ~ "Chicago Bulls",
+      team == "Cleveland Cavaliers" ~ "Cleveland Cavaliers",
+      team == "Dallas Mavericks" ~ "Dallas Mavericks",
+      team == "Denver Nuggets" ~ "Denver Nuggets",
+      team %in% c("Detroit Pistons","Fort Wayne Pistons") ~ "Detroit Pistons",
+      team %in% c("Golden State Warriors","San Francisco Warriors","Philadelphia Warriors") ~ "Golden State Warriors",
+      team %in% c("Houston Rockets","San Diego Rockets") ~ "Houston Rockets",
+      team == "Indiana Pacers" ~ "Indiana Pacers",
+      team %in% c("Los Angeles Clippers","San Diego Clippers","Buffalo Braves") ~ "Los Angeles Clippers",
+      team %in% c("Los Angeles Lakers","Minneapolis Lakers") ~ "Los Angeles Lakers",
+      team %in% c("Memphis Grizzlies","Vancouver Grizzlies") ~ "Memphis Grizzlies",
+      team == "Miami Heat" ~ "Miami Heat",
+      team == "Milwaukee Bucks" ~ "Milwaukee Bucks",
+      team == "Minnesota Timberwolves" ~ "Minnesota Timberwolves",
+      team %in% c("New Orleans Pelicans","New Orleans Hornets","New Orleans/Oklahoma City Hornets") ~ "New Orleans Pelicans",
+      team == "New York Knicks" ~ "New York Knicks",
+      team %in% c("Oklahoma City Thunder","Seattle SuperSonics") ~ "Oklahoma City Thunder",
+      team == "Orlando Magic" ~ "Orlando Magic",
+      team %in% c("Philadelphia 76ers","Syracuse Nationals") ~ "Philadelphia 76ers",
+      team == "Phoenix Suns" ~ "Phoenix Suns",
+      team == "Portland Trail Blazers" ~ "Portland Trail Blazers",
+      team %in% c("Sacramento Kings","Kansas City Kings",
+                  "Kansas City-Omaha Kings","Cincinnati Royals","Rochester Royals") ~ "Sacramento Kings",
+      team == "San Antonio Spurs" ~ "San Antonio Spurs",
+      team == "Toronto Raptors" ~ "Toronto Raptors",
+      team %in% c("Utah Jazz","New Orleans Jazz") ~ "Utah Jazz",
+      team %in% c("Washington Wizards","Washington Bullets","Capital Bullets","Baltimore Bullets") ~ "Washington Wizards",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(franchise)) %>%
+  mutate(
+    win_pct = w / (w + l)
+  )
+
+
+team_summaries <- team_summaries |>
+  mutate(season = as.numeric(season))
+
+team_choices <- sort(unique(team_summaries$franchise))
+
+season_min <- min(team_summaries$season, na.rm = TRUE)
+season_max <- max(team_summaries$season, na.rm = TRUE)
+
+metric_groups <- list(
+  "Overall performance" = c("w", "l", "mov", "srs", "o_rtg", "d_rtg", "n_rtg", "pace"),
+  "Shooting & efficiency" = c("ts_percent", "e_fg_percent",
+                                                 "tov_percent", "orb_percent", "ft_fga"),
+  "Opponent factors" = c("opp_e_fg_percent", "opp_tov_percent", "opp_ft_fga")
+)
+
+metric_labels <- c(
+  w = "Wins",
+  l = "Losses",
+  mov = "Margin of Victory",
+  srs = "Simple Rating System (SRS)",
+  o_rtg = "Offensive Rating",
+  d_rtg = "Defensive Rating",
+  n_rtg = "Net Rating",
+  pace = "Pace (possessions per 48)",
+  ts_percent = "True Shooting %",
+  e_fg_percent = "Effective FG %",
+  tov_percent = "Turnover Rate %",
+  orb_percent = "Offensive Rebound %",
+  ft_fga = "FT Rate (FT/FGA)",
+  opp_e_fg_percent = "Opponent Effective FG %",
+  opp_tov_percent = "Opponent Turnover Rate %",
+  opp_ft_fga = "Opponent FT Rate (FT/FGA)"
+)
+
+
+pretty_metric <- function(var) {
+  metric_labels[[var]] %||% var
+}
+
+ui <- fluidPage(
+  titlePanel("NBA Team Comparison Tool"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        inputId = "team1",
+        label = "Team 1",
+        choices = team_choices,
+        selected = team_choices[1]
+      ),
+      selectInput(
+        inputId = "team2",
+        label = "Team 2",
+        choices = team_choices,
+        selected = team_choices[2]
+      ),
+      sliderInput(
+        inputId = "season_range",
+        label = "Season range",
+        min = season_min,
+        max = season_max,
+        value = c(season_min, season_max),
+        step = 1,
+        sep = ""
+      ),
+      selectInput(
+        inputId = "metric_group",
+        label = "Metric category",
+        choices = names(metric_groups),
+        selected = "Overall performance"
+      ),
+      uiOutput("metric_ui"),
+      
+      helpText()
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel(
+          "Trend Plot",
+          br(),
+          textOutput("plot_caption"),
+          plotOutput("trend_plot", height = "400px")
+        ),
+        tabPanel(
+          "Summary Table",
+          br(),
+          textOutput("table_caption"),
+          tableOutput("summary_table")
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  output$metric_ui <- renderUI({
+    group_name <- input$metric_group
+    vars_in_group <- metric_groups[[group_name]]
+    
+    selectInput(
+      inputId = "metric",
+      label = "Metric",
+      choices = setNames(vars_in_group, sapply(vars_in_group, pretty_metric)),
+      selected = vars_in_group[1]
+    )
+  })
+  filtered_data <- reactive({
+    req(input$team1, input$team2, input$season_range)
+    
+    team_summaries %>% 
+      filter(
+        franchise %in% c(input$team1, input$team2),
+        season >= input$season_range[1],
+        season <= input$season_range[2]
+      )
+  })
+  output$plot_caption <- renderText({
+    req(input$metric)
+    metric_name <- pretty_metric(input$metric)
+    
+    paste0(
+      "Comparing ", metric_name, " for ",
+      input$team1, " vs. ", input$team2,
+      " from seasons ", input$season_range[1], "–", input$season_range[2], "."
+    )
+  })
+  output$trend_plot <- renderPlot({
+    df <- filtered_data()
+    req(nrow(df) > 0, input$metric)
+    
+    metric_var <- sym(input$metric)
+    
+    ggplot(df, aes(x = season, y = !!metric_var, color = franchise)) +
+      geom_line(linewidth = 1) +
+      geom_point(size = 2) +
+      scale_x_continuous(breaks = pretty(df$season)) +
+      labs(
+        x = "Season",
+        y = pretty_metric(input$metric),
+        color = "Team"
+      ) +
+      theme_minimal(base_size = 14)
+  })
+  output$table_caption <- renderText({
+    req(input$metric)
+    metric_name <- pretty_metric(input$metric)
+    
+    paste0(
+      "Average and last-season values of ", metric_name,
+      " for ", input$team1, " and ", input$team2,
+      " over the selected seasons."
+    )
+  })
+}  
+
+shinyApp(ui = ui, server = server)
+
+```
+
+```{r}
+# shiny app 2
+
+library(shiny)
+library(tidyverse)
+library(ggplot2)
+library(scales)
+
+team_summaries <- read_csv("Team Summaries.csv")
+
+team_summaries <- team_summaries %>%
+  mutate(
+    season = as.numeric(season),
+    franchise = case_when(
+      team %in% c("Atlanta Hawks","St. Louis Hawks","Milwaukee Hawks","Tri-Cities Blackhawks") ~ "Atlanta Hawks",
+      team == "Boston Celtics" ~ "Boston Celtics",
+      team %in% c("Brooklyn Nets","New Jersey Nets","New York Nets","New Jersey Americans") ~ "Brooklyn Nets",
+      team %in% c("Charlotte Hornets","Charlotte Bobcats") ~ "Charlotte Hornets",
+      team == "Chicago Bulls" ~ "Chicago Bulls",
+      team == "Cleveland Cavaliers" ~ "Cleveland Cavaliers",
+      team == "Dallas Mavericks" ~ "Dallas Mavericks",
+      team == "Denver Nuggets" ~ "Denver Nuggets",
+      team %in% c("Detroit Pistons","Fort Wayne Pistons") ~ "Detroit Pistons",
+      team %in% c("Golden State Warriors","San Francisco Warriors","Philadelphia Warriors") ~ "Golden State Warriors",
+      team %in% c("Houston Rockets","San Diego Rockets") ~ "Houston Rockets",
+      team == "Indiana Pacers" ~ "Indiana Pacers",
+      team %in% c("Los Angeles Clippers","San Diego Clippers","Buffalo Braves") ~ "Los Angeles Clippers",
+      team %in% c("Los Angeles Lakers","Minneapolis Lakers") ~ "Los Angeles Lakers",
+      team %in% c("Memphis Grizzlies","Vancouver Grizzlies") ~ "Memphis Grizzlies",
+      team == "Miami Heat" ~ "Miami Heat",
+      team == "Milwaukee Bucks" ~ "Milwaukee Bucks",
+      team == "Minnesota Timberwolves" ~ "Minnesota Timberwolves",
+      team %in% c("New Orleans Pelicans","New Orleans Hornets","New Orleans/Oklahoma City Hornets") ~ "New Orleans Pelicans",
+      team == "New York Knicks" ~ "New York Knicks",
+      team %in% c("Oklahoma City Thunder","Seattle SuperSonics") ~ "Oklahoma City Thunder",
+      team == "Orlando Magic" ~ "Orlando Magic",
+      team %in% c("Philadelphia 76ers","Syracuse Nationals") ~ "Philadelphia 76ers",
+      team == "Phoenix Suns" ~ "Phoenix Suns",
+      team == "Portland Trail Blazers" ~ "Portland Trail Blazers",
+      team %in% c("Sacramento Kings","Kansas City Kings",
+                  "Kansas City-Omaha Kings","Cincinnati Royals","Rochester Royals") ~ "Sacramento Kings",
+      team == "San Antonio Spurs" ~ "San Antonio Spurs",
+      team == "Toronto Raptors" ~ "Toronto Raptors",
+      team %in% c("Utah Jazz","New Orleans Jazz") ~ "Utah Jazz",
+      team %in% c("Washington Wizards","Washington Bullets","Capital Bullets","Baltimore Bullets") ~ "Washington Wizards",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(franchise)) %>%
+  mutate(
+    win_pct = w / (w + l)
+  )
+
+team_choices <- sort(unique(team_summaries$franchise))
+
+metric_choices <- c(
+  "pace", "x3p_ar", "f_tr", "ts_percent", 
+  "o_rtg", "d_rtg"
+)
+
+metric_labels <- c(
+  pace       = "Pace",
+  x3p_ar     = "3PA Rate (3PA / FGA)",
+  f_tr       = "Free Throw Rate (FTA / FGA)",
+  ts_percent = "True Shooting %",
+  o_rtg      = "Offensive Rating",
+  d_rtg      = "Defensive Rating"
+)
+
+ui <- fluidPage(
+  titlePanel("Team Playstyle Fingerprint: Winning vs Losing Seasons"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("team", "Choose a Team:", choices = team_choices),
+      checkboxGroupInput(
+        "metrics",
+        "Select Metrics:",
+        choices = c(
+          "Pace"                      = "pace",
+          "3PA Rate (3PA / FGA)"      = "x3p_ar",
+          "Free Throw Rate (FTA / FGA)" = "f_tr",
+          "True Shooting %"           = "ts_percent",
+          "Offensive Rating"          = "o_rtg",
+          "Defensive Rating"          = "d_rtg"
+        ),
+        selected = c("pace","x3p_ar","ts_percent")
+      ),
+      sliderInput("cutoff", "Win% cutoff for 'winning season':",
+                  min = 0.3, max = 0.7, value = 0.5, step = 0.05)
+    ),
+    
+    mainPanel(
+      plotOutput("fingerprintPlot", height = "650px")
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  fingerprint_data <- reactive({
+    
+    req(input$metrics)
+    league <- team_summaries %>%
+      group_by(season) %>%
+      summarize(across(all_of(metric_choices), mean, na.rm = TRUE))
+    
+    long_league <- league %>%
+      pivot_longer(all_of(metric_choices),
+                   names_to = "metric",
+                   values_to = "league_avg")
+    
+    team_long <- team_summaries %>%
+      filter(franchise == input$team) %>%
+      pivot_longer(all_of(metric_choices),
+                   names_to = "metric",
+                   values_to = "team_value") %>%
+      left_join(long_league, by = c("season", "metric")) %>%
+      mutate(
+        deviation = team_value - league_avg,
+        group = ifelse(win_pct >= input$cutoff, "Winning Seasons", "Losing Seasons"),
+        metric_label = recode(metric, !!!metric_labels)
+      ) %>%
+      filter(metric %in% input$metrics)
+    team_long %>%
+      group_by(group, metric_label) %>%
+      summarize(avg_dev = mean(deviation, na.rm = TRUE)) %>%
+      ungroup()
+  })
+  
+  output$fingerprintPlot <- renderPlot({
+    
+    df <- fingerprint_data()
+    
+    ggplot(df, aes(x = metric_label, y = avg_dev, fill = group)) +
+      geom_col(position = "dodge", width = 0.7) +
+      geom_hline(yintercept = 0, color = "black", size = 0.5) +
+    geom_text(
+      aes(
+        label = round(avg_dev, 2),
+        y = avg_dev,
+        x = metric_label,
+        group = group
+      ),
+      position = position_dodge(width = 0.7),
+      hjust = ifelse(df$avg_dev > 0, -0.15, 1.15),
+      size = 4
+    ) +
+    coord_flip() +
+      scale_fill_manual(values = c("Winning Seasons" = "#1b9e77",
+                                   "Losing Seasons" = "#d95f02")) +
+      labs(
+        title = paste("Playstyle Fingerprint for", input$team),
+        subtitle = paste(
+          "Average deviation from league average in winning (≥",
+          input$cutoff, ") vs losing seasons"
+        ),
+        x = "Metric",
+        y = "Deviation from League Average (team − league)",
+        fill = ""
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(size = 12),
+        plot.title = element_text(face = "bold", size = 18)
+      )
+  })
+  
+}
+
+shinyApp(ui, server)
+```
+
